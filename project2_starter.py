@@ -1,13 +1,13 @@
 # SI 201 HW4 (Library Checkout System)
-# Your name:
-# Your student id:
-# Your email:
-# Who or what you worked with on this homework (including generative AI like ChatGPT):
-# If you worked with generative AI also add a statement for how you used it.
+# Your name: Annika Gurnani 
+# Your student id: 29363715
+# Your email: agurnani@umich.edu
+# Who or what you worked with on this homework (including generative AI like ChatGPT): n/a
+# If you worked with generative AI also add a statement for how you used it. used ChatGPT for hints on debugging
 # e.g.:
 # Asked ChatGPT for hints on debugging and for suggestions on overall code structure
 #
-# Did your use of GenAI on this assignment align with your goals and guidelines in your Gen AI contract? If not, why?
+# Did your use of GenAI on this assignment align with your goals and guidelines in your Gen AI contract? If not, why? yes
 #
 # --- ARGUMENTS & EXPECTED RETURN VALUES PROVIDED --- #
 # --- SEE INSTRUCTIONS FOR FULL DETAILS ON METHOD IMPLEMENTATION --- #
@@ -37,14 +37,22 @@ def load_listing_results(html_path) -> list[tuple]:
     Returns:
         list[tuple]: A list of tuples containing (listing_title, listing_id)
     """
-    # TODO: Implement checkout logic following the instructions
-    # ==============================
-    # YOUR CODE STARTS HERE
-    # ==============================
-    pass
-    # ==============================
-    # YOUR CODE ENDS HERE
-    # ==============================
+    with open(html_path, encoding="utf-8-sig") as f:
+        soup = BeautifulSoup(f, "html.parser")
+
+    results = []
+
+    listings = soup.find_all("div", class_="t1jojoys dir dir-ltr")
+
+    for listing in listings:
+        title = listing.get_text().strip()
+
+        parent = listing.find_parent("a")
+        if parent and "href" in parent.attrs:
+            listing_id = parent["href"].split("/")[-1]
+            results.append((title, listing_id))
+
+    return results
 
 
 def get_listing_details(listing_id) -> dict:
