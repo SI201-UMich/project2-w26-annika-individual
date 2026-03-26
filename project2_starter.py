@@ -3,7 +3,7 @@
 # Your student id: 29363715
 # Your email: agurnani@umich.edu
 # Who or what you worked with on this homework (including generative AI like ChatGPT): n/a
-# If you worked with generative AI also add a statement for how you used it. used ChatGPT for hints on debugging
+# If you worked with generative AI also add a statement for how you used it. asked ChatGPT for hints on debugging
 # e.g.:
 # Asked ChatGPT for hints on debugging and for suggestions on overall code structure
 #
@@ -37,27 +37,19 @@ def load_listing_results(html_path) -> list[tuple]:
     Returns:
         list[tuple]: A list of tuples containing (listing_title, listing_id)
     """
-    base_path = os.path.abspath(os.path.dirname(__file__))
 
-    if not os.path.isabs(html_path):
-        html_path = os.path.join(base_path, html_path)
-
-    with open(html_path, encoding="utf-8-sig") as f:
-        soup = BeautifulSoup(f, "html.parser")
+    with open(html_path, "r", encoding="utf-8-sig") as f:
+        soup = BeautifulSoup(f.read(), "html.parser")
 
     results = []
-
-    listings = soup.find_all("div", class_="t1jojoys dir dir-ltr")
-
-    for listing in listings:
-        title = listing.get_text().strip()
-
-        parent = listing.find_parent("a")
-        if parent and "href" in parent.attrs:
-            listing_id = parent["href"].split("/")[-1]
-            results.append((title, listing_id))
+    title_divs = soup.find_all("div", {"data-testid": "listing-card-title"})
+    for div in title_divs:
+        listing_title = div.get_text().strip()
+        listing_id = div.get("id", "").replace("title_", "")
+        results.append((listing_title, listing_id))
 
     return results
+
 
 
 def get_listing_details(listing_id) -> dict:
@@ -79,55 +71,87 @@ def get_listing_details(listing_id) -> dict:
             }
         }
     """
-    base_path = os.path.abspath(os.path.dirname(__file__))
-    file_path = os.path.join(base_path, "html_files", f"listing_{listing_id}.html")
+    base_dir = os.path.abspath(os.path.dirname(__file__))
+    file_path = os.path.join(base_dir, "html_files", f"listing_{listing_id}.html")
 
-    with open(file_path, encoding="utf-8-sig") as f:
-        soup = BeautifulSoup(f, "html.parser")
+    with open(file_path, "r", encoding="utf-8-sig") as f:
+        soup = BeautifulSoup(f.read(), "html.parser")
 
-    data = {}
+    policy_number = ""
+    items = soup.find_all("li", class_="f19phm7j")
 
-    # policy number
-    policy_tag = soup.find(string=re.compile("Policy"))
-    policy_number = "Pending"
-    if policy_tag:
-        match = re.search(r"(STR-\d+)", policy_tag)
-        if match:
-            policy_number = match.group()
+    for item in items:
+        text = item.get_text()
+        if "Policy" in text or "License" in text:
+            span = item.find("span", class_="ll4r2nl")
 
-    # host type
-    host_type = "Regular"
-    if soup.find(string=re.compile("Superhost")):
+            if span:
+                policy_number = span.get_text().strip().replace("\ufeff", "")
+            else:
+                policy_number = text.replace("Policy number:", "").replace(
+                    "License number:", ""
+                ).strip()
+
+            lower_policy = policy_number.lower()
+            if "pending" in lower_policy:
+                policy_number = "Pending"
+            elif "exempt" in lower_policy:
+                policy_number = "Exempt"
+            break
+
+    if soup.find(string=lambda t: t and t.strip() == "Superhost"):
         host_type = "Superhost"
+    else:
+        host_type = "regular"
 
-    # host name
     host_name = ""
-    host_tag = soup.find("div", class_=re.compile("host"))
-    if host_tag:
-        host_name = host_tag.get_text().strip()
-
-    # room type
-    room_type = ""
-    room_tag = soup.find(string=re.compile("room"))
-    if room_tag:
-        room_type = room_tag.strip()
-
-    # location rating
-    rating = 0.0
-    rating_tag = soup.find(string=re.compile("Location"))
-    if rating_tag:
-        match = re.search(r"(\d\.\d)", rating_tag)
+    for h2 in soup.find_all("h2"):
+        text = h2.get_text().replace("\xa0", " ")
+        match = re.search(r"[Hh]osted by\s+(.+)", text)
         if match:
-            rating = float(match.group())
+            host_name = match.group(1).strip()
+            break
 
-    data[listing_id] = {
-        "policy_number": policy_number,
-        "host_type": host_type,
-        "host_name": host_name,
-        "room_type": room_type,
-        "location_rating": rating
+    room_type = "Entire Room"
+    subtitle = ""
+
+    for h2 in soup.find_all("h2"):
+        text = h2.get_text().replace("\xa0", " ")
+        if "hosted by" in text.lower():
+            subtitle = text
+            break
+
+    if "Private" in subtitle:
+        room_type = "Private Room"
+    elif "Shared" in subtitle:
+        room_type = "Shared Room"
+    else:
+        extra_div = soup.find("div", class_="_kh3xmo")
+        if extra_div:
+            extra_text = extra_div.get_text()
+            if "Private" in extra_text:
+                room_type = "Private Room"
+            elif "Shared" in extra_text:
+                room_type = "Shared Room"
+
+    location_rating = 0.0
+    location_div = soup.find("div", class_="_y1ba89", string="Location")
+
+    if location_div:
+        parent_text = location_div.parent.get_text().replace("Location", "").strip()
+        match = re.search(r"(\d+\.?\d*)", parent_text)
+        if match:
+            location_rating = float(match.group(1))
+
+    return {
+        listing_id: {
+            "policy_number": policy_number,
+            "host_type": host_type,
+            "host_name": host_name,
+            "room_type": room_type,
+            "location_rating": location_rating,
+        }
     }
-    return data
 
 
 def create_listing_database(html_path) -> list[tuple]:
@@ -142,22 +166,24 @@ def create_listing_database(html_path) -> list[tuple]:
         (listing_title, listing_id, policy_number, host_type, host_name, room_type, location_rating)
     """
     listings = load_listing_results(html_path)
-    database = []
+    final_data = []
 
     for title, listing_id in listings:
-        details = get_listing_details(listing_id)[listing_id]
+        details = get_listing_details(listing_id)
+        info = details[listing_id]
 
-        database.append((
+        row = (
             title,
             listing_id,
-            details["policy_number"],
-            details["host_type"],
-            details["host_name"],
-            details["room_type"],
-            details["location_rating"]
-        ))
+            info["policy_number"],
+            info["host_type"],
+            info["host_name"],
+            info["room_type"],
+            info["location_rating"],
+        )
+        final_data.append(row)
 
-    return database
+    return final_data
 
 
 def output_csv(data, filename) -> None:
@@ -173,16 +199,22 @@ def output_csv(data, filename) -> None:
     Returns:
         None
     """
-    sorted_data = sorted(data, key=lambda x: x[-1], reverse=True)
+    sorted_data = sorted(data, key=lambda row: row[6], reverse=True)
 
     with open(filename, "w", newline="", encoding="utf-8-sig") as f:
         writer = csv.writer(f)
 
-        writer.writerow([
-            "title", "id", "policy_number",
-            "host_type", "host_name",
-            "room_type", "location_rating"
-        ])
+        writer.writerow(
+            [
+                "Listing Title",
+                "Listing ID",
+                "Policy Number",
+                "Host Type",
+                "Host Name",
+                "Room Type",
+                "Location Rating",
+            ]
+        )
 
         for row in sorted_data:
             writer.writerow(row)
@@ -205,22 +237,22 @@ def avg_location_rating_by_room_type(data) -> dict:
     counts = {}
 
     for row in data:
-        room_type = row[5]
+        room = row[5]
         rating = row[6]
 
         if rating == 0.0:
             continue
 
-        if room_type not in totals:
-            totals[room_type] = 0
-            counts[room_type] = 0
+        if room not in totals:
+            totals[room] = 0
+            counts[room] = 0
 
-        totals[room_type] += rating
-        counts[room_type] += 1
+        totals[room] += rating
+        counts[room] += 1
 
     averages = {}
-    for room_type in totals:
-        averages[room_type] = round(totals[room_type] / counts[room_type], 1)
+    for room in totals:
+        averages[room] = round(totals[room] / counts[room], 1)
 
     return averages
 
@@ -236,21 +268,24 @@ def validate_policy_numbers(data) -> list[str]:
     Returns:
         list[str]: A list of listing_id values whose policy numbers do NOT match the valid format
     """
-    invalid = []
+    bad_ids = []
 
-    pattern = r"^STR-\d+$"
+    pattern1 = r"^20\d{2}-00\d{4}STR$"
+    pattern2 = r"^STR-000\d{4}$"
 
     for row in data:
         listing_id = row[1]
-        policy = row[2]
+        policy_number = row[2]
 
-        if policy in ["Pending", "Exempt"]:
+        if policy_number == "Pending" or policy_number == "Exempt":
             continue
 
-        if not re.match(pattern, policy):
-            invalid.append(listing_id)
+        if not re.match(pattern1, policy_number) and not re.match(
+            pattern2, policy_number
+        ):
+            bad_ids.append(listing_id)
 
-    return invalid
+    return bad_ids
 
 
 # EXTRA CREDIT
@@ -263,14 +298,20 @@ def google_scholar_searcher(query):
     Returns:
         List of titles on the first page (list)
     """
-    # TODO: Implement checkout logic following the instructions
-    # ==============================
-    # YOUR CODE STARTS HERE
-    # ==============================
-    pass
-    # ==============================
-    # YOUR CODE ENDS HERE
-    # ==============================
+    url = "https://scholar.google.com/scholar"
+    params = {"q": query}
+    headers = {
+        "User-Agent": "Mozilla/5.0"
+    }
+
+    response = requests.get(url, params=params, headers=headers)
+    soup = BeautifulSoup(response.text, "html.parser")
+
+    titles = []
+    for result in soup.find_all("h3", class_="gs_rt"):
+        titles.append(result.get_text().strip())
+
+    return titles
 
 
 class TestCases(unittest.TestCase):
